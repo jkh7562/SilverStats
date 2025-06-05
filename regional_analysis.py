@@ -30,7 +30,15 @@ class RegionalAnalysisPage:
     def __init__(self, parent):
         self.parent = parent
         self.setup_styles()
-        self.setup_data()
+
+        # 데이터 로드 (더미 데이터 없음)
+        if not self.setup_data():
+            # CSV 로드 실패 시 에러 메시지 표시하고 종료
+            tk.messagebox.showerror("데이터 로드 실패",
+                                    "CSV 파일을 찾을 수 없거나 읽을 수 없습니다.\n"
+                                    "데이터셋/통합_시도별_데이터셋.csv 파일을 확인해주세요.")
+            return
+
         self.load_geodata()
         self.create_interface()
 
@@ -124,269 +132,179 @@ class RegionalAnalysisPage:
         print("더미 지도 데이터 생성 완료")
 
     def setup_data(self):
-        """실제 데이터셋에서 데이터 로드"""
-        try:
-            # 여러 인코딩 시도
-            encodings = ['utf-8', 'cp949', 'euc-kr']
-            df = None
+        """실제 데이터셋에서 데이터 로드 - 더미 데이터 없음"""
+        print("=== 데이터 로드 시작 ===")
 
-            for encoding in encodings:
-                try:
-                    df = pd.read_csv("데이터셋/통합_시도별_데이터셋.csv", encoding=encoding)
-                    print(f"{encoding} 인코딩으로 데이터 로드 성공")
+        # CSV 파일 경로 확인
+        csv_path = "데이터셋/통합_시도별_데이터셋.csv"
+        print(f"CSV 파일 경로: {csv_path}")
+        print(f"파일 존재 여부: {os.path.exists(csv_path)}")
+
+        if not os.path.exists(csv_path):
+            print("ERROR: CSV 파일이 존재하지 않습니다!")
+            print("현재 디렉토리:", os.getcwd())
+            if os.path.exists("데이터셋"):
+                print("데이터셋 폴더 내용:", os.listdir("데이터셋"))
+            else:
+                print("데이터셋 폴더가 없습니다!")
+            return False
+
+        # CSV 파일 로드 시도
+        df = None
+        encodings = ['utf-8', 'cp949', 'euc-kr', 'latin1']
+
+        for encoding in encodings:
+            try:
+                print(f"{encoding} 인코딩으로 CSV 로드 시도...")
+                df = pd.read_csv(csv_path, encoding=encoding)
+                print(f"SUCCESS: {encoding} 인코딩으로 로드 성공!")
+                print(f"데이터 크기: {len(df)} 행, {len(df.columns)} 열")
+                break
+            except Exception as e:
+                print(f"FAILED: {encoding} 인코딩 실패 - {e}")
+                continue
+
+        if df is None:
+            print("ERROR: 모든 인코딩으로 CSV 로드 실패!")
+            return False
+
+        # 컬럼명 출력
+        print("\n=== CSV 컬럼명 ===")
+        for i, col in enumerate(df.columns):
+            print(f"{i + 1:2d}. {col}")
+
+        # 첫 몇 행 출력
+        print("\n=== 첫 3행 데이터 ===")
+        print(df.head(3))
+
+        # 시도명 컬럼 찾기
+        region_col = None
+        for col in df.columns:
+            if '시도' in col or '지역' in col:
+                region_col = col
+                print(f"시도명 컬럼 찾음: {region_col}")
+                break
+
+        if region_col is None:
+            region_col = df.columns[0]
+            print(f"시도명 컬럼을 찾지 못해 첫 번째 컬럼 사용: {region_col}")
+
+        # 시도명 목록 출력
+        print(f"\n=== {region_col} 컬럼의 값들 ===")
+        for i, region in enumerate(df[region_col]):
+            print(f"{i + 1:2d}. {region}")
+
+        # 데이터 추출
+        self.data = {}
+
+        # 지역명 매핑
+        region_mapping = {
+            "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구",
+            "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전",
+            "울산광역시": "울산", "세종특별자치시": "세종", "경기도": "경기",
+            "강원특별자치도": "강원", "강원도": "강원", "충청북도": "충북",
+            "충청남도": "충남", "전북특별자치도": "전북", "전라북도": "전북",
+            "전라남도": "전남", "경상북도": "경북", "경상남도": "경남",
+            "제주특별자치도": "제주"
+        }
+
+        print("\n=== 데이터 추출 시작 ===")
+
+        # 필수 지표들
+        required_indicators = ["자살률(10만명당)", "기초연금 수급률", "독거노인가구비율", "복지시설률", "노령화지수"]
+
+        for _, row in df.iterrows():
+            region_full = str(row[region_col]).strip()
+            print(f"\n처리 중인 지역: {region_full}")
+
+            # 지역명 매핑
+            region_short = None
+            for full, short in region_mapping.items():
+                if region_full in full or full in region_full:
+                    region_short = short
+                    print(f"  매핑됨: {region_full} -> {region_short}")
                     break
-                except UnicodeDecodeError:
-                    continue
-                except Exception as e:
-                    print(f"데이터 로드 오류: {e}")
-                    continue
 
-            if df is None:
-                raise Exception("모든 인코딩으로 데이터 로드 실패")
+            if region_short is None:
+                # 직접 매핑이 안되면 문자열 정리
+                region_short = region_full.replace('특별시', '').replace('광역시', '').replace('도', '').replace('특별자치시',
+                                                                                                          '').replace(
+                    '특별자치도', '').strip()
+                print(f"  직접 매핑: {region_full} -> {region_short}")
 
-            # 컬럼명 확인 및 정리
-            print("원본 컬럼명:", df.columns.tolist())
+            # 지역 데이터 초기화
+            if region_short not in self.data:
+                self.data[region_short] = {}
 
-            # 시도명 컬럼 찾기
-            region_col = None
+            # 각 지표별 데이터 추출
             for col in df.columns:
-                if '시도' in col or '지역' in col:
-                    region_col = col
-                    break
+                col_lower = col.lower()
 
-            if region_col is None:
-                region_col = df.columns[0]  # 첫 번째 컬럼을 시도명으로 가정
+                if '65세이상' in col and '자살' in col:
+                    try:
+                        value = float(row[col])
+                        self.data[region_short]["자살률(10만명당)"] = value
+                        print(f"    자살률: {value}")
+                    except Exception as e:
+                        print(f"    자살률 변환 실패: {e}")
 
-            print(f"시도명 컬럼으로 '{region_col}' 사용")
+                elif '수급률' in col:
+                    try:
+                        value = float(row[col])
+                        self.data[region_short]["기초연금 수급률"] = value
+                        print(f"    수급률: {value}")
+                    except Exception as e:
+                        print(f"    수급률 변환 실패: {e}")
 
-            # 지역명 매핑 정의
-            region_mapping = {
-                "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구",
-                "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전",
-                "울산광역시": "울산", "세종특별자치시": "세종", "경기도": "경기",
-                "강원특별자치도": "강원", "강원도": "강원", "충청북도": "충북",
-                "충청남도": "충남", "전북특별자치도": "전북", "전라북도": "전북",
-                "전라남도": "전남", "경상북도": "경북", "경상남도": "경남",
-                "제주특별자치도": "제주"
-            }
+                elif '독거노인' in col and '가구' in col:
+                    try:
+                        value = float(row[col])
+                        self.data[region_short]["독거노인가구비율"] = value
+                        print(f"    독거노인가구비율: {value}")
+                    except Exception as e:
+                        print(f"    독거노인가구비율 변환 실패: {e}")
 
-            # 데이터 사전 초기화
-            self.data = {}
+                elif '복지시설' in col:
+                    try:
+                        value = float(row[col])
+                        self.data[region_short]["복지시설률"] = value
+                        print(f"    복지시설률: {value}")
+                    except Exception as e:
+                        print(f"    복지시설률 변환 실패: {e}")
 
-            # 데이터 채우기
-            for _, row in df.iterrows():
-                region = row[region_col].strip()
+                elif '노령화' in col and '지수' in col:
+                    try:
+                        value = float(row[col])
+                        self.data[region_short]["노령화지수"] = value
+                        print(f"    노령화지수: {value}")
+                    except Exception as e:
+                        print(f"    노령화지수 변환 실패: {e}")
 
-                # 시도명 정리 (특별시, 광역시, 도 등 제거)
-                region_short = None
-                for full, short in region_mapping.items():
-                    if region in full or full in region:
-                        region_short = short
-                        break
+        print("\n=== 최종 데이터 확인 ===")
+        for region, data in self.data.items():
+            print(f"{region}: {data}")
 
-                # 매핑된 지역명이 없으면 원래 이름 사용
-                if region_short is None:
-                    # 시도명에서 '특별시', '광역시', '도' 등 제거
-                    region_short = region.replace('특별시', '').replace('광역시', '').replace('도', '').replace('특별자치시',
-                                                                                                         '').replace(
-                        '특별자치도', '').strip()
-                    print(f"매핑되지 않은 지역명: {region} -> {region_short}")
+        # 데이터 검증 - 모든 지역이 모든 지표를 가지고 있는지 확인
+        missing_data = []
+        for region, data in self.data.items():
+            for indicator in required_indicators:
+                if indicator not in data:
+                    missing_data.append(f"{region}의 {indicator}")
 
-                # 지역 데이터 초기화
-                if region_short not in self.data:
-                    self.data[region_short] = {}
+        if missing_data:
+            print(f"\n경고: 누락된 데이터가 있습니다:")
+            for missing in missing_data:
+                print(f"  - {missing}")
+            print("누락된 데이터가 있어 애플리케이션이 제대로 작동하지 않을 수 있습니다.")
+            return False
 
-                # 각 지표별로 데이터 추출
-                for col in df.columns:
-                    if '65세이상_평균자살률' in col:
-                        try:
-                            self.data[region_short]["자살률(10만명당)"] = float(row[col])
-                        except (ValueError, TypeError):
-                            self.data[region_short]["자살률(10만명당)"] = 50.0
-                    elif '수급률' in col:
-                        try:
-                            self.data[region_short]["기초연금 수급률"] = float(row[col])
-                        except (ValueError, TypeError):
-                            self.data[region_short]["기초연금 수급률"] = 65.0
-                    elif '독거노인가구비율' in col:
-                        try:
-                            self.data[region_short]["독거노인가구비율"] = float(row[col])
-                        except (ValueError, TypeError):
-                            self.data[region_short]["독거노인가구비율"] = 10.0
-                    elif '복지시설률' in col:
-                        try:
-                            self.data[region_short]["복지시설률"] = float(row[col])
-                        except (ValueError, TypeError):
-                            self.data[region_short]["복지시설률"] = 5.0
-                    elif '평균노령화지수' in col:
-                        try:
-                            self.data[region_short]["노령화지수"] = float(row[col])
-                        except (ValueError, TypeError):
-                            self.data[region_short]["노령화지수"] = 400.0
+        # 최소한의 지역이 있는지 확인
+        if len(self.data) < 5:
+            print(f"ERROR: 로드된 지역이 너무 적습니다 ({len(self.data)}개)")
+            return False
 
-            # 데이터 확인
-            print("로드된 데이터:")
-            for region, values in self.data.items():
-                print(f"{region}: {values}")
-
-            # 누락된 지역이 있는지 확인하고 기본값으로 채우기
-            all_regions = ["강원", "경기", "경남", "경북", "광주", "대구", "대전", "부산",
-                           "서울", "세종", "울산", "인천", "전남", "전북", "제주", "충남", "충북"]
-
-            for region in all_regions:
-                if region not in self.data:
-                    self.data[region] = {
-                        "자살률(10만명당)": 50.0,
-                        "기초연금 수급률": 65.0,
-                        "독거노인가구비율": 10.0,
-                        "복지시설률": 5.0,
-                        "노령화지수": 400.0
-                    }
-                else:
-                    # 누락된 지표가 있는지 확인
-                    if "자살률(10만명당)" not in self.data[region]:
-                        self.data[region]["자살률(10만명당)"] = 50.0
-                    if "기초연금 수급률" not in self.data[region]:
-                        self.data[region]["기초연금 수급률"] = 65.0
-                    if "독거노인가구비율" not in self.data[region]:
-                        self.data[region]["독거노인가구비율"] = 10.0
-                    if "복지시설률" not in self.data[region]:
-                        self.data[region]["복지시설률"] = 5.0
-                    if "노령화지수" not in self.data[region]:
-                        self.data[region]["노령화지수"] = 400.0
-
-        except Exception as e:
-            print(f"데이터 로드 중 오류 발생: {e}")
-            print(f"오류 상세: {traceback.format_exc()}")
-
-            # 오류 발생 시 더미 데이터 사용
-            print("더미 데이터로 대체합니다.")
-
-            # 더미 데이터 - 실제 값으로 수정
-            self.data = {
-                "서울": {
-                    "자살률(10만명당)": 45.3,
-                    "기초연금 수급률": 53.94,
-                    "독거노인가구비율": 8.1,
-                    "복지시설률": 2.75,
-                    "노령화지수": 253.2
-                },
-                "부산": {
-                    "자살률(10만명당)": 48.0,
-                    "기초연금 수급률": 70.74,
-                    "독거노인가구비율": 11.9,
-                    "복지시설률": 1.58,
-                    "노령화지수": 404.1
-                },
-                "대구": {
-                    "자살률(10만명당)": 39.9,
-                    "기초연금 수급률": 69.59,
-                    "독거노인가구비율": 10.6,
-                    "복지시설률": 5.38,
-                    "노령화지수": 402.9
-                },
-                "인천": {
-                    "자살률(10만명당)": 46.5,
-                    "기초연금 수급률": 70.54,
-                    "독거노인가구비율": 9.3,
-                    "복지시설률": 9.19,
-                    "노령화지수": 326.9
-                },
-                "광주": {
-                    "자살률(10만명당)": 53.6,
-                    "기초연금 수급률": 65.33,
-                    "독거노인가구비율": 8.9,
-                    "복지시설률": 4.2,
-                    "노령화지수": 295.5
-                },
-                "대전": {
-                    "자살률(10만명당)": 56.6,
-                    "기초연금 수급률": 63.87,
-                    "독거노인가구비율": 8.3,
-                    "복지시설률": 5.76,
-                    "노령화지수": 259.2
-                },
-                "울산": {
-                    "자살률(10만명당)": 43.4,
-                    "기초연금 수급률": 63.96,
-                    "독거노인가구비율": 8.1,
-                    "복지시설률": 2.96,
-                    "노령화지수": 259.6
-                },
-                "세종": {
-                    "자살률(10만명당)": 48.8,
-                    "기초연금 수급률": 53.15,
-                    "독거노인가구비율": 4.9,
-                    "복지시설률": 4.56,
-                    "노령화지수": 288.1
-                },
-                "경기": {
-                    "자살률(10만명당)": 49.0,
-                    "기초연금 수급률": 61.08,
-                    "독거노인가구비율": 7.4,
-                    "복지시설률": 9.48,
-                    "노령화지수": 256.3
-                },
-                "강원": {
-                    "자살률(10만명당)": 67.2,
-                    "기초연금 수급률": 67.5,
-                    "독거노인가구비율": 13.1,
-                    "복지시설률": 8.71,
-                    "노령화지수": 641.6
-                },
-                "충북": {
-                    "자살률(10만명당)": 56.4,
-                    "기초연금 수급률": 60.24,
-                    "독거노인가구비율": 11.0,
-                    "복지시설률": 8.5,
-                    "노령화지수": 214.3
-                },
-                "충남": {
-                    "자살률(10만명당)": 72.2,
-                    "기초연금 수급률": 77.48,
-                    "독거노인가구비율": 15.5,
-                    "복지시설률": 6.74,
-                    "노령화지수": 829.6
-                },
-                "전북": {
-                    "자살률(10만명당)": 42.7,
-                    "기초연금 수급률": 73.15,
-                    "독거노인가구비율": 13.5,
-                    "복지시설률": 5.79,
-                    "노령화지수": 751.4
-                },
-                "전남": {
-                    "자살률(10만명당)": 42.9,
-                    "기초연금 수급률": 71.05,
-                    "독거노인가구비율": 11.1,
-                    "복지시설률": 7.54,
-                    "노령화지수": 795.8
-                },
-                "경북": {
-                    "자살률(10만명당)": 43.6,
-                    "기초연금 수급률": 73.68,
-                    "독거노인가구비율": 13.6,
-                    "복지시설률": 6.74,
-                    "노령화지수": 949.1
-                },
-                "경남": {
-                    "자살률(10만명당)": 46.0,
-                    "기초연금 수급률": 71.66,
-                    "독거노인가구비율": 12.0,
-                    "복지시설률": 3.75,
-                    "노령화지수": 852.5
-                },
-                "제주": {
-                    "자살률(10만명당)": 41.9,
-                    "기초연금 수급률": 69.5,
-                    "독거노인가구비율": 8.5,
-                    "복지시설률": 5.63,
-                    "노령화지수": 778.4
-                }
-            }
-
-        self.regions = list(self.data.keys())
-        self.current_region = "서울"
+        self.regions = sorted(list(self.data.keys()))
+        self.current_region = self.regions[0]
 
         # 지표 이름과 단위
         self.indicators = {
@@ -396,6 +314,10 @@ class RegionalAnalysisPage:
             "복지시설률": "%",
             "노령화지수": ""
         }
+
+        print("=== 데이터 로드 완료 ===")
+        print(f"총 {len(self.regions)}개 지역 로드됨: {self.regions}")
+        return True
 
     def create_interface(self):
         # 메인 컨테이너
@@ -427,7 +349,7 @@ class RegionalAnalysisPage:
         # 왼쪽 패널 구성
         self.create_left_panel(left_panel)
 
-        # ���른쪽 패널 구성
+        # 오른쪽 패널 구성
         self.create_right_panel(right_panel)
 
     def create_left_panel(self, parent):

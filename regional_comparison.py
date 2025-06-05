@@ -56,26 +56,23 @@ class RegionalComparisonPage:
         self.indicator_reverse_mapping = {v: k for k, v in self.indicator_display_names.items()}
 
         # 지역 체크박스 변수들을 먼저 정의
-        self.regions = ["강원", "경기", "경남", "경북", "광주", "대구", "대전", "부산",
-                        "서울", "세종", "울산", "인천", "전남", "전북", "제주", "충남", "충북"]
+        self.regions = []  # CSV에서 로드된 지역들로 설정됨
         self.region_vars = {}
-        for region in self.regions:
-            self.region_vars[region] = tk.BooleanVar()
 
         # 전체 선택 변수
         self.select_all_var = tk.BooleanVar()
 
-        # 기본 선택 지역
-        # 기본 선택 지역 - 전국
-        for region in self.regions:
-            self.region_vars[region].set(True)
-        # 전체 선택 체크박스도 선택
-        self.select_all_var.set(True)
-
         # 현재 선택된 지표
         self.current_indicator = "65세이상_평균자살률"
 
-        self.setup_data()
+        # 데이터 로드 (더미 데이터 없음)
+        if not self.setup_data():
+            # CSV 로드 실패 시 에러 메시지 표시하고 종료
+            tk.messagebox.showerror("데이터 로드 실패",
+                                    "CSV 파일을 찾을 수 없거나 읽을 수 없습니다.\n"
+                                    "데이터셋/통합_시도별_데이터셋.csv 파일을 확인해주세요.")
+            return
+
         self.load_geodata()
         self.create_interface()
 
@@ -224,151 +221,153 @@ class RegionalComparisonPage:
         print("지도 데이터 로드 완료")
 
     def setup_data(self):
-        """실제 데이터셋에서 데이터 로드"""
-        try:
-            # 여러 인코딩 시도
-            encodings = ['utf-8', 'cp949', 'euc-kr']
-            df = None
+        """실제 데이터셋에서 데이터 로드 - 더미 데이터 없음"""
+        print("=== 데이터 로드 시작 ===")
 
-            for encoding in encodings:
-                try:
-                    df = pd.read_csv("데이터셋/통합_시도별_데이터셋.csv", encoding=encoding)
-                    print(f"{encoding} 인코딩으로 데이터 로드 성공")
+        # CSV 파일 경로 확인
+        csv_path = "데이터셋/통합_시도별_데이터셋.csv"
+        print(f"CSV 파일 경로: {csv_path}")
+        print(f"파일 존재 여부: {os.path.exists(csv_path)}")
+
+        if not os.path.exists(csv_path):
+            print("ERROR: CSV 파일이 존재하지 않습니다!")
+            print("현재 디렉토리:", os.getcwd())
+            if os.path.exists("데이터셋"):
+                print("데이터셋 폴더 내용:", os.listdir("데이터셋"))
+            else:
+                print("데이터셋 폴더가 없습니다!")
+            return False
+
+        # CSV 파일 로드 시도
+        df = None
+        encodings = ['utf-8', 'cp949', 'euc-kr', 'latin1']
+
+        for encoding in encodings:
+            try:
+                print(f"{encoding} 인코딩으로 CSV 로드 시도...")
+                df = pd.read_csv(csv_path, encoding=encoding)
+                print(f"SUCCESS: {encoding} 인코딩으로 로드 성공!")
+                print(f"데이터 크기: {len(df)} 행, {len(df.columns)} 열")
+                break
+            except Exception as e:
+                print(f"FAILED: {encoding} 인코딩 실패 - {e}")
+                continue
+
+        if df is None:
+            print("ERROR: 모든 인코딩으로 CSV 로드 실패!")
+            return False
+
+        # 컬럼명 출력
+        print("\n=== CSV 컬럼명 ===")
+        for i, col in enumerate(df.columns):
+            print(f"{i + 1:2d}. {col}")
+
+        # 첫 몇 행 출력
+        print("\n=== 첫 3행 데이터 ===")
+        print(df.head(3))
+
+        # 시도명 컬럼 찾기
+        region_col = None
+        for col in df.columns:
+            if '시도' in col or '지역' in col:
+                region_col = col
+                print(f"시도명 컬럼 찾음: {region_col}")
+                break
+
+        if region_col is None:
+            region_col = df.columns[0]
+            print(f"시도명 컬럼을 찾지 못해 첫 번째 컬럼 사용: {region_col}")
+
+        # 시도명 목록 출력
+        print(f"\n=== {region_col} 컬럼의 값들 ===")
+        for i, region in enumerate(df[region_col]):
+            print(f"{i + 1:2d}. {region}")
+
+        # 데이터 사전 초기화
+        self.data = {
+            "65세이상_평균자살률": {},
+            "평균노령화지수": {},
+            "기초연금 수급률": {},
+            "복지시설률": {},
+            "독거노인가구비율": {}
+        }
+
+        # 컬럼 매핑 (CSV 컬럼명과 앱에서 사용하는 지표명 매핑)
+        column_mapping = {
+            '65세이상_평균자살률': '65세이상_평균자살률',
+            '평균노령화지수': '평균노령화지수',
+            '수급률': '기초연금 수급률',
+            '복지시설률': '복지시설률',
+            '독거노인가구비율': '독거노인가구비율'
+        }
+
+        print("\n=== 데이터 추출 시작 ===")
+
+        # 데이터 채우기
+        for _, row in df.iterrows():
+            region_full = str(row[region_col]).strip()
+            print(f"\n처리 중인 지역: {region_full}")
+
+            # 시도명 정리 (특별시, 광역시, 도 등 제거)
+            region_short = None
+            for full, short in self.region_mapping.items():
+                if region_full in full or full in region_full:
+                    region_short = short
+                    print(f"  매핑됨: {region_full} -> {region_short}")
                     break
-                except UnicodeDecodeError:
-                    continue
-                except Exception as e:
-                    print(f"데이터 로드 오류: {e}")
-                    continue
 
-            if df is None:
-                raise Exception("모든 인코딩으로 데이터 로드 실패")
+            # 매핑된 지역명이 없으면 원래 이름 사용
+            if region_short is None:
+                # 시도명에서 '특별시', '광역시', '도' 등 제거
+                region_short = region_full.replace('특별시', '').replace('광역시', '').replace('도', '').replace('특별자치시',
+                                                                                                          '').replace(
+                    '특별자치도', '').strip()
+                print(f"  직접 매핑: {region_full} -> {region_short}")
 
-            # 컬럼명 확인 및 정리
-            print("원본 컬럼명:", df.columns.tolist())
+            # 각 지표별로 데이터 추출
+            for csv_col, indicator in column_mapping.items():
+                for col in df.columns:
+                    if csv_col.lower() in col.lower():
+                        try:
+                            value = float(row[col])
+                            self.data[indicator][region_short] = value
+                            print(f"    {indicator}: {value}")
+                            break
+                        except (ValueError, TypeError) as e:
+                            print(f"    {indicator} 변환 실패: {e}")
+                            continue
 
-            # 시도명 컬럼 찾기
-            region_col = None
-            for col in df.columns:
-                if '시도' in col or '지역' in col:
-                    region_col = col
-                    break
+        print("\n=== 최종 데이터 확인 ===")
+        for indicator, values in self.data.items():
+            print(f"{indicator}: {len(values)} 지역")
+            if len(values) > 0:
+                print(f"  샘플: {list(values.items())[:3]}")
 
-            if region_col is None:
-                region_col = df.columns[0]  # 첫 번째 컬럼을 시도명으로 가정
+        # 데이터 검증 - 최소한의 지역과 지표가 있는지 확인
+        total_regions = set()
+        for indicator_data in self.data.values():
+            total_regions.update(indicator_data.keys())
 
-            print(f"시도명 컬럼으로 '{region_col}' 사용")
+        if len(total_regions) < 5:
+            print(f"ERROR: 로드된 지역이 너무 적습니다 ({len(total_regions)}개)")
+            return False
 
-            # 데이터 사전 초기화
-            self.data = {
-                "65세이상_평균자살률": {},
-                "평균노령화지수": {},
-                "기초연금 수급률": {},
-                "복지시설률": {},
-                "독거노인가구비율": {}
-            }
+        # 지역 목록 설정
+        self.regions = sorted(list(total_regions))
 
-            # 컬럼 매핑 (CSV 컬럼명과 앱에서 사용하는 지표명 매핑)
-            column_mapping = {
-                '65세이상_평균자살률': '65세이상_평균자살률',
-                '평균노령화지수': '평균노령화지수',
-                '수급률': '기초연금 수급률',
-                '복지시설률': '복지시설률',
-                '독거노인가구비율': '독거노인가구비율'
-            }
+        # 지역 체크박스 변수 설정
+        for region in self.regions:
+            self.region_vars[region] = tk.BooleanVar()
 
-            # 데이터 채우기
-            for _, row in df.iterrows():
-                region = row[region_col].strip()
+        # 기본 선택 지역 - 전국
+        for region in self.regions:
+            self.region_vars[region].set(True)
+        # 전체 선택 체크박스도 선택
+        self.select_all_var.set(True)
 
-                # 시도명 정리 (특별시, 광역시, 도 등 제거)
-                region_short = None
-                for full, short in self.region_mapping.items():
-                    if region in full or full in region:
-                        region_short = short
-                        break
-
-                # 매핑된 지역명이 없으면 원래 이름 사용
-                if region_short is None:
-                    # 시도명에서 '특별시', '광역시', '도' 등 제거
-                    region_short = region.replace('특별시', '').replace('광역시', '').replace('도', '').replace('특별자치시',
-                                                                                                         '').replace(
-                        '특별자치도', '').strip()
-                    print(f"매핑되지 않은 지역명: {region} -> {region_short}")
-
-                # 각 지표별로 데이터 추출
-                for csv_col, indicator in column_mapping.items():
-                    for col in df.columns:
-                        if csv_col.lower() in col.lower():
-                            try:
-                                value = float(row[col])
-                                self.data[indicator][region_short] = value
-                                break
-                            except (ValueError, TypeError):
-                                continue
-
-            # 데이터 확인
-            print("로드된 데이터:")
-            for indicator, values in self.data.items():
-                print(f"{indicator}: {len(values)} 지역")
-                if len(values) > 0:
-                    print(f"  샘플: {list(values.items())[:3]}")
-
-            # 누락된 데이터가 있는지 확인하고 더미 데이터로 채우기
-            for indicator in self.data:
-                for region in self.regions:
-                    if region not in self.data[indicator]:
-                        if indicator == "복지시설률":
-                            self.data[indicator][region] = 5.0
-                        elif indicator == "65세이상_평균자살률":
-                            self.data[indicator][region] = 50.0
-                        elif indicator == "평균노령화지수":
-                            self.data[indicator][region] = 400.0
-                        elif indicator == "기초연금 수급률":
-                            self.data[indicator][region] = 65.0
-                        else:  # 독거노인가구비율
-                            self.data[indicator][region] = 10.0
-
-        except Exception as e:
-            print(f"데이터 로드 중 오류 발생: {e}")
-            print(f"오류 상세: {traceback.format_exc()}")
-
-            # 오류 발생 시 더미 데이터 사용
-            print("더미 데이터로 대체합니다.")
-
-            # 더미 데이터 - 정확한 값으로 수정
-            self.data = {
-                "65세이상_평균자살률": {
-                    "강원": 67.2, "경기": 49.0, "경남": 46.0, "경북": 43.6, "광주": 53.6,
-                    "대구": 39.9, "대전": 56.6, "부산": 48.0, "서울": 45.3, "세종": 48.8,
-                    "울산": 43.4, "인천": 46.5, "전남": 42.9, "전북": 42.7, "제주": 41.9,
-                    "충남": 72.2, "충북": 56.4
-                },
-                "평균노령화지수": {
-                    "강원": 641.6, "경기": 256.3, "경남": 852.5, "경북": 949.1, "광주": 295.5,
-                    "대구": 402.9, "대전": 259.2, "부산": 404.1, "서울": 253.2, "세종": 288.1,
-                    "울산": 259.6, "인천": 326.9, "전남": 795.8, "전북": 751.4, "제주": 778.4,
-                    "충남": 829.6, "충북": 214.3
-                },
-                "기초연금 수급률": {
-                    "강원": 67.5, "경기": 61.08, "경남": 71.66, "경북": 73.68, "광주": 65.33,
-                    "대구": 69.59, "대전": 63.87, "부산": 70.74, "서울": 53.94, "세종": 53.15,
-                    "울산": 63.96, "인천": 70.54, "전남": 71.05, "전북": 73.15, "제주": 69.5,
-                    "충남": 77.48, "충북": 60.24
-                },
-                "복지시설률": {
-                    "강원": 8.71, "경기": 9.48, "경남": 3.75, "경북": 6.74, "광주": 4.2,
-                    "대구": 5.38, "대전": 5.76, "부산": 1.58, "서울": 2.75, "세종": 4.56,
-                    "울산": 2.96, "인천": 9.19, "전남": 7.54, "전북": 5.79, "제주": 5.63,
-                    "충남": 6.74, "충북": 8.5
-                },
-                "독거노인가구비율": {
-                    "강원": 13.1, "경기": 7.4, "경남": 12.0, "경북": 13.6, "광주": 8.9,
-                    "대구": 10.6, "대전": 8.3, "부산": 11.9, "서울": 8.1, "세종": 4.9,
-                    "울산": 8.1, "인천": 9.3, "전남": 11.1, "전북": 13.5, "제주": 8.5,
-                    "충남": 15.5, "충북": 11.0
-                }
-            }
+        print("=== 데이터 로드 완료 ===")
+        print(f"총 {len(self.regions)}개 지역 로드됨: {self.regions}")
+        return True
 
     def create_interface(self):
         # 메인 컨테이너
@@ -598,41 +597,55 @@ class RegionalComparisonPage:
             self.ax.set_yticks([])
         else:
             # 차트 데이터 준비
-            values = [self.data[self.current_indicator][region] for region in selected_regions]
+            values = []
+            valid_regions = []
 
-            # 차트 그리기
-            self.ax.clear()
-            bars = self.ax.bar(selected_regions, values, color='#4285F4', alpha=0.8)
+            for region in selected_regions:
+                if region in self.data[self.current_indicator]:
+                    values.append(self.data[self.current_indicator][region])
+                    valid_regions.append(region)
 
-            # 차트 스타일링
-            self.ax.set_ylabel(self.indicator_reverse_mapping[self.current_indicator], fontsize=10)
-            self.ax.tick_params(axis='x', rotation=45, labelsize=9)
-            self.ax.tick_params(axis='y', labelsize=9)
-
-            # Y축 포맷팅
-            if self.current_indicator == "복지시설률":
-                self.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.2f}'))
-            elif self.current_indicator == "독거노인가구비율":
-                self.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1f}'))
+            if not values:
+                self.ax.clear()
+                self.ax.text(0.5, 0.5, '선택된 지역의 데이터가 없습니다',
+                             horizontalalignment='center', verticalalignment='center',
+                             transform=self.ax.transAxes, fontsize=12)
+                self.ax.set_xticks([])
+                self.ax.set_yticks([])
             else:
-                self.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1f}'))
+                # 차트 그리기
+                self.ax.clear()
+                bars = self.ax.bar(valid_regions, values, color='#4285F4', alpha=0.8)
 
-            # 막대 위에 값 표시
-            for bar, value in zip(bars, values):
-                height = bar.get_height()
-                if self.current_indicator == "평균노령화지수":
-                    label = f'{value:.1f}'
-                elif self.current_indicator == "복지시설률":
-                    label = f'{value:.2f}'
+                # 차트 스타일링
+                self.ax.set_ylabel(self.indicator_reverse_mapping[self.current_indicator], fontsize=10)
+                self.ax.tick_params(axis='x', rotation=45, labelsize=9)
+                self.ax.tick_params(axis='y', labelsize=9)
+
+                # Y축 포맷팅
+                if self.current_indicator == "복지시설률":
+                    self.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.2f}'))
+                elif self.current_indicator == "독거노인가구비율":
+                    self.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1f}'))
                 else:
-                    label = f'{value:.1f}'
+                    self.ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.1f}'))
 
-                self.ax.text(bar.get_x() + bar.get_width() / 2., height + max(values) * 0.01,
-                             label, ha='center', va='bottom', fontsize=8)
+                # 막대 위에 값 표시
+                for bar, value in zip(bars, values):
+                    height = bar.get_height()
+                    if self.current_indicator == "평균노령화지수":
+                        label = f'{value:.1f}'
+                    elif self.current_indicator == "복지시설률":
+                        label = f'{value:.2f}'
+                    else:
+                        label = f'{value:.1f}'
 
-            # 여백 조정
-            self.ax.set_ylim(0, max(values) * 1.15 if values else 1)
-            plt.tight_layout()
+                    self.ax.text(bar.get_x() + bar.get_width() / 2., height + max(values) * 0.01,
+                                 label, ha='center', va='bottom', fontsize=8)
+
+                # 여백 조정
+                self.ax.set_ylim(0, max(values) * 1.15 if values else 1)
+                plt.tight_layout()
 
         # 차트 업데이트
         if hasattr(self, 'canvas'):
