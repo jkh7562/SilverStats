@@ -1,3 +1,5 @@
+# 스타일 설정
+
 import tkinter as tk
 import tkinter.font as tkFont
 

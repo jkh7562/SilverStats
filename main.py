@@ -1,3 +1,5 @@
+# 메인 대시보드
+
 import tkinter as tk
 import tkinter.font as tkFont
 from regional_comparison import RegionalComparisonPage
