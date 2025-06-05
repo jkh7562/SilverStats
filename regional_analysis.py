@@ -44,7 +44,7 @@ class RegionalAnalysisPage:
         for encoding in encodings_to_try:
             try:
                 print(f"인코딩 {encoding}으로 시도 중...")
-                self.gdf = gpd.read_file("bnd_sido_00_2024_2Q.shp", encoding=encoding)
+                self.gdf = gpd.read_file("데이터셋/경계데이터/bnd_sido_00_2024_2Q.shp", encoding=encoding)
                 print(f"지도 데이터 로드 성공 (인코딩: {encoding})")
                 print("컬럼:", self.gdf.columns.tolist())
 
@@ -90,7 +90,7 @@ class RegionalAnalysisPage:
             print("모든 인코딩 시도 실패. SIDO_CD 컬럼을 사용하여 매핑합니다.")
             try:
                 # 인코딩 없이 시도
-                self.gdf = gpd.read_file("bnd_sido_00_2024_2Q.shp")
+                self.gdf = gpd.read_file("데이터셋/경계데이터/bnd_sido_00_2024_2Q.shp")
                 self.지역컬럼 = 'SIDO_CD'  # 코드 컬럼 사용
                 self.use_code_mapping = True
             except Exception as e:

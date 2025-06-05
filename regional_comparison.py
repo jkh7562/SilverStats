@@ -47,7 +47,7 @@ class RegionalComparisonPage:
         for encoding in encodings_to_try:
             try:
                 print(f"인코딩 {encoding}으로 시도 중...")
-                self.gdf = gpd.read_file("bnd_sido_00_2024_2Q.shp", encoding=encoding)
+                self.gdf = gpd.read_file("데이터셋/경계데이터/bnd_sido_00_2024_2Q.shp", encoding=encoding)
                 print(f"지도 데이터 로드 성공 (인코딩: {encoding})")
                 print("컬럼:", self.gdf.columns.tolist())
 
@@ -91,7 +91,7 @@ class RegionalComparisonPage:
         if not hasattr(self, 'gdf') or self.gdf is None:
             print("모든 인코딩 시도 실패. SIDO_CD 컬럼을 사용하여 매핑합니다.")
             try:
-                self.gdf = gpd.read_file("bnd_sido_00_2024_2Q.shp")
+                self.gdf = gpd.read_file("데이터셋/경계데이터/bnd_sido_00_2024_2Q.shp")
                 self.지역컬럼 = 'SIDO_CD'
                 self.use_code_mapping = True
             except Exception as e:
