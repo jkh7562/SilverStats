@@ -1,4 +1,4 @@
-
+# 지역 심층 분석
 
 import tkinter as tk
 from tkinter import ttk
@@ -15,6 +15,8 @@ import threading
 import os
 import warnings
 import traceback
+from matplotlib.patches import Polygon
+import matplotlib.patches as patches
 
 # 경고 메시지 숨기기
 warnings.filterwarnings('ignore')
@@ -40,253 +42,359 @@ class RegionalAnalysisPage:
         self.unit_font = tkFont.Font(family="맑은 고딕", size=10)
 
     def load_geodata(self):
-        """지도 데이터 로드 - 여러 인코딩 시도"""
-        encodings_to_try = ['utf-8', 'euc-kr', 'cp949', 'latin1']
+        """지도 데이터 로드 - 실패 시 더미 지도 생성"""
+        self.gdf = None
+        self.지역컬럼 = None
+        self.use_code_mapping = False
 
-        for encoding in encodings_to_try:
-            try:
-                print(f"인코딩 {encoding}으로 시도 중...")
-                self.gdf = gpd.read_file("데이터셋/경계데이터/bnd_sido_00_2024_2Q.shp", encoding=encoding)
-                print(f"지도 데이터 로드 성공 (인코딩: {encoding})")
-                print("컬럼:", self.gdf.columns.tolist())
+        # 실제 지도 파일 로드 시도
+        try:
+            encodings_to_try = ['utf-8', 'euc-kr', 'cp949', 'latin1']
 
-                # 지역명 컬럼 찾기
-                possible_columns = ['SIDO_NM', 'CTP_KOR_NM', 'NAME', 'SIDONM']
-                self.지역컬럼 = None
+            for encoding in encodings_to_try:
+                try:
+                    print(f"인코딩 {encoding}으로 시도 중...")
+                    self.gdf = gpd.read_file("데이터셋/경계데이터/bnd_sido_00_2024_2Q.shp", encoding=encoding)
+                    print(f"지도 데이터 로드 성공 (인코딩: {encoding})")
 
-                for col in possible_columns:
-                    if col in self.gdf.columns:
-                        self.지역컬럼 = col
-                        break
-
-                if self.지역컬럼 is None:
-                    # 첫 번째 문자열 컬럼을 사용
-                    for col in self.gdf.columns:
-                        if self.gdf[col].dtype == 'object':
+                    # 지역명 컬럼 찾기
+                    possible_columns = ['SIDO_NM', 'CTP_KOR_NM', 'NAME', 'SIDONM']
+                    for col in possible_columns:
+                        if col in self.gdf.columns:
                             self.지역컬럼 = col
                             break
 
-                print(f"사용할 지역 컬럼: {self.지역컬럼}")
-                if self.지역컬럼:
-                    print("지역명들:", self.gdf[self.지역컬럼].tolist()[:5])  # 처음 5개만 출력
-
-                # 지역명이 제대로 읽혔는지 확인
-                if self.지역컬럼 and len(self.gdf[self.지역컬럼].iloc[0]) > 0:
-                    first_region = self.gdf[self.지역컬럼].iloc[0]
-                    # 한글이 제대로 읽혔는지 확인 (깨진 문자가 아닌지)
-                    if any(ord(char) > 127 for char in first_region if char.isalpha()):
-                        print(f"한글 지역명 확인됨: {first_region}")
+                    if self.지역컬럼:
+                        print(f"지역 컬럼 찾음: {self.지역컬럼}")
                         break
-                    else:
-                        print(f"지역명이 깨져 보임: {first_region}")
-                        continue
-                else:
+
+                except Exception as e:
+                    print(f"인코딩 {encoding} 실패: {e}")
                     continue
 
-            except Exception as e:
-                print(f"인코딩 {encoding} 실패: {e}")
-                continue
+        except Exception as e:
+            print(f"지도 파일 로드 실패: {e}")
 
-        # 모든 인코딩이 실패한 경우
-        if not hasattr(self, 'gdf') or self.gdf is None:
-            print("모든 인코딩 시도 실패. SIDO_CD 컬럼을 사용하여 매핑합니다.")
-            try:
-                # 인코딩 없이 시도
-                self.gdf = gpd.read_file("데이터셋/경계데이터/bnd_sido_00_2024_2Q.shp")
-                self.지역컬럼 = 'SIDO_CD'  # 코드 컬럼 사용
-                self.use_code_mapping = True
-            except Exception as e:
-                print(f"최종 로드 실패: {e}")
-                self.gdf = None
-                self.지역컬럼 = None
-                return
-        else:
-            self.use_code_mapping = False
+        # 지도 파일 로드 실패 시 더미 지도 데이터 생성
+        if self.gdf is None:
+            print("더미 지도 데이터 생성")
+            self.create_dummy_map_data()
 
         # 지역명 매핑 설정
-        if self.use_code_mapping:
-            # SIDO_CD 기반 매핑
-            self.region_mapping = {
-                '11': '서울',
-                '26': '부산',
-                '27': '대구',
-                '28': '인천',
-                '29': '광주',
-                '30': '대전',
-                '31': '울산',
-                '36': '세종',
-                '41': '경기',
-                '42': '강원',
-                '43': '충북',
-                '44': '충남',
-                '45': '전북',
-                '46': '전남',
-                '47': '경북',
-                '48': '경남',
-                '50': '제주'
-            }
-        else:
-            # 지역명 기반 매핑
-            self.region_mapping = {
-                "서울특별시": "서울",
-                "부산광역시": "부산",
-                "대구광역시": "대구",
-                "인천광역시": "인천",
-                "광주광역시": "광주",
-                "대전광역시": "대전",
-                "울산광역시": "울산",
-                "세종특별자치시": "세종",
-                "경기도": "경기",
-                "강원특별자치도": "강원",
-                "강원도": "강원",
-                "충청북도": "충북",
-                "충청남도": "충남",
-                "전북특별자치도": "전북",
-                "전라북도": "전북",
-                "전라남도": "전남",
-                "경상북도": "경북",
-                "경상남도": "경남",
-                "제주특별자치도": "제주"
-            }
+        self.region_mapping = {
+            "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구",
+            "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전",
+            "울산광역시": "울산", "세종특별자치시": "세종", "경기도": "경기",
+            "강원특별자치도": "강원", "강원도": "강원", "충청북도": "충북",
+            "충청남도": "충남", "전북특별자치도": "전북", "전라북도": "전북",
+            "전라남도": "전남", "경상북도": "경북", "경상남도": "경남",
+            "제주특별자치도": "제주"
+        }
 
         # 역매핑 생성
         self.reverse_mapping = {v: k for k, v in self.region_mapping.items()}
-        print("지도 데이터 로드 완료")
+        print("지도 데이터 준비 완료")
+
+    def create_dummy_map_data(self):
+        """더미 지도 데이터 생성 - 간단한 도형으로 각 지역 표현"""
+        print("더미 지도 데이터 생성 중...")
+
+        # 간단한 지역별 좌표 정의 (대략적인 위치)
+        self.dummy_regions = {
+            "서울": {"x": 0.5, "y": 0.7, "size": 0.08},
+            "인천": {"x": 0.4, "y": 0.7, "size": 0.06},
+            "경기": {"x": 0.5, "y": 0.6, "size": 0.12},
+            "강원": {"x": 0.7, "y": 0.6, "size": 0.1},
+            "충북": {"x": 0.5, "y": 0.5, "size": 0.08},
+            "충남": {"x": 0.4, "y": 0.5, "size": 0.08},
+            "대전": {"x": 0.45, "y": 0.45, "size": 0.05},
+            "세종": {"x": 0.48, "y": 0.48, "size": 0.04},
+            "전북": {"x": 0.35, "y": 0.4, "size": 0.08},
+            "전남": {"x": 0.3, "y": 0.3, "size": 0.1},
+            "광주": {"x": 0.32, "y": 0.35, "size": 0.05},
+            "경북": {"x": 0.65, "y": 0.45, "size": 0.1},
+            "대구": {"x": 0.6, "y": 0.4, "size": 0.06},
+            "경남": {"x": 0.55, "y": 0.3, "size": 0.1},
+            "부산": {"x": 0.65, "y": 0.25, "size": 0.06},
+            "울산": {"x": 0.7, "y": 0.3, "size": 0.05},
+            "제주": {"x": 0.3, "y": 0.1, "size": 0.06}
+        }
+
+        self.use_dummy_map = True
+        print("더미 지도 데이터 생성 완료")
 
     def setup_data(self):
-        # 지역별 데이터
-        self.data = {
-            "서울": {
-                "자살률": 20.5,
-                "기초연금 수급률": 15.2,
-                "1인 가구 수": 1250000,
-                "복지시설 수": 850,
-                "노령화 지수": 12.8
-            },
-            "부산": {
-                "자살률": 25.3,
-                "기초연금 수급률": 22.1,
-                "1인 가구 수": 680000,
-                "복지시설 수": 420,
-                "노령화 지수": 18.5
-            },
-            "대구": {
-                "자살률": 24.8,
-                "기초연금 수급률": 20.5,
-                "1인 가구 수": 520000,
-                "복지시설 수": 310,
-                "노령화 지수": 16.2
-            },
-            "인천": {
-                "자살률": 21.9,
-                "기초연금 수급률": 17.8,
-                "1인 가구 수": 620000,
-                "복지시설 수": 380,
-                "노령화 지수": 14.1
-            },
-            "광주": {
-                "자살률": 23.6,
-                "기초연금 수급률": 19.3,
-                "1인 가구 수": 320000,
-                "복지시설 수": 180,
-                "노령화 지수": 15.7
-            },
-            "대전": {
-                "자살률": 22.4,
-                "기초연금 수급률": 18.1,
-                "1인 가구 수": 380000,
-                "복지시설 수": 220,
-                "노령화 지수": 13.9
-            },
-            "울산": {
-                "자살률": 26.1,
-                "기초연금 수급률": 16.5,
-                "1인 가구 수": 280000,
-                "복지시설 수": 150,
-                "노령화 지수": 11.2
-            },
-            "세종": {
-                "자살률": 18.5,
-                "기초연금 수급률": 12.8,
-                "1인 가구 수": 95000,
-                "복지시설 수": 45,
-                "노령화 지수": 8.9
-            },
-            "경기": {
-                "자살률": 19.8,
-                "기초연금 수급률": 14.5,
-                "1인 가구 수": 2100000,
-                "복지시설 수": 1200,
-                "노령화 지수": 13.2
-            },
-            "강원": {
-                "자살률": 28.7,
-                "기초연금 수급률": 25.8,
-                "1인 가구 수": 320000,
-                "복지시설 수": 180,
-                "노령화 지수": 22.1
-            },
-            "충북": {
-                "자살률": 26.4,
-                "기초연금 수급률": 23.2,
-                "1인 가구 수": 280000,
-                "복지시설 수": 160,
-                "노령화 지수": 19.8
-            },
-            "충남": {
-                "자살률": 25.1,
-                "기초연금 수급률": 21.9,
-                "1인 가구 수": 420000,
-                "복지시설 수": 240,
-                "노령화 지수": 18.5
-            },
-            "전북": {
-                "자살률": 29.2,
-                "기초연금 수급률": 26.7,
-                "1인 가구 수": 380000,
-                "복지시설 수": 200,
-                "노령화 지수": 23.4
-            },
-            "전남": {
-                "자살률": 31.2,
-                "기초연금 수급률": 28.9,
-                "1인 가구 수": 320000,
-                "복지시설 수": 180,
-                "노령화 지수": 25.6
-            },
-            "경북": {
-                "자살률": 27.8,
-                "기초연금 수급률": 24.5,
-                "1인 가구 수": 520000,
-                "복지시설 수": 280,
-                "노령화 지수": 21.3
-            },
-            "경남": {
-                "자살률": 26.9,
-                "기초연금 수급률": 23.1,
-                "1인 가구 수": 680000,
-                "복지시설 수": 350,
-                "노령화 지수": 19.7
-            },
-            "제주": {
-                "자살률": 19.8,
-                "기초연금 수급률": 16.2,
-                "1인 가구 수": 140000,
-                "복지시설 수": 80,
-                "노령화 지수": 14.8
+        """실제 데이터셋에서 데이터 로드"""
+        try:
+            # 여러 인코딩 시도
+            encodings = ['utf-8', 'cp949', 'euc-kr']
+            df = None
+
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv("데이터셋/통합_시도별_데이터셋.csv", encoding=encoding)
+                    print(f"{encoding} 인코딩으로 데이터 로드 성공")
+                    break
+                except UnicodeDecodeError:
+                    continue
+                except Exception as e:
+                    print(f"데이터 로드 오류: {e}")
+                    continue
+
+            if df is None:
+                raise Exception("모든 인코딩으로 데이터 로드 실패")
+
+            # 컬럼명 확인 및 정리
+            print("원본 컬럼명:", df.columns.tolist())
+
+            # 시도명 컬럼 찾기
+            region_col = None
+            for col in df.columns:
+                if '시도' in col or '지역' in col:
+                    region_col = col
+                    break
+
+            if region_col is None:
+                region_col = df.columns[0]  # 첫 번째 컬럼을 시도명으로 가정
+
+            print(f"시도명 컬럼으로 '{region_col}' 사용")
+
+            # 지역명 매핑 정의
+            region_mapping = {
+                "서울특별시": "서울", "부산광역시": "부산", "대구광역시": "대구",
+                "인천광역시": "인천", "광주광역시": "광주", "대전광역시": "대전",
+                "울산광역시": "울산", "세종특별자치시": "세종", "경기도": "경기",
+                "강원특별자치도": "강원", "강원도": "강원", "충청북도": "충북",
+                "충청남도": "충남", "전북특별자치도": "전북", "전라북도": "전북",
+                "전라남도": "전남", "경상북도": "경북", "경상남도": "경남",
+                "제주특별자치도": "제주"
             }
-        }
+
+            # 데이터 사전 초기화
+            self.data = {}
+
+            # 데이터 채우기
+            for _, row in df.iterrows():
+                region = row[region_col].strip()
+
+                # 시도명 정리 (특별시, 광역시, 도 등 제거)
+                region_short = None
+                for full, short in region_mapping.items():
+                    if region in full or full in region:
+                        region_short = short
+                        break
+
+                # 매핑된 지역명이 없으면 원래 이름 사용
+                if region_short is None:
+                    # 시도명에서 '특별시', '광역시', '도' 등 제거
+                    region_short = region.replace('특별시', '').replace('광역시', '').replace('도', '').replace('특별자치시',
+                                                                                                         '').replace(
+                        '특별자치도', '').strip()
+                    print(f"매핑되지 않은 지역명: {region} -> {region_short}")
+
+                # 지역 데이터 초기화
+                if region_short not in self.data:
+                    self.data[region_short] = {}
+
+                # 각 지표별로 데이터 추출
+                for col in df.columns:
+                    if '65세이상_평균자살률' in col:
+                        try:
+                            self.data[region_short]["자살률(10만명당)"] = float(row[col])
+                        except (ValueError, TypeError):
+                            self.data[region_short]["자살률(10만명당)"] = 50.0
+                    elif '수급률' in col:
+                        try:
+                            self.data[region_short]["기초연금 수급률"] = float(row[col])
+                        except (ValueError, TypeError):
+                            self.data[region_short]["기초연금 수급률"] = 65.0
+                    elif '독거노인가구비율' in col:
+                        try:
+                            self.data[region_short]["독거노인가구비율"] = float(row[col])
+                        except (ValueError, TypeError):
+                            self.data[region_short]["독거노인가구비율"] = 10.0
+                    elif '복지시설률' in col:
+                        try:
+                            self.data[region_short]["복지시설률"] = float(row[col])
+                        except (ValueError, TypeError):
+                            self.data[region_short]["복지시설률"] = 5.0
+                    elif '평균노령화지수' in col:
+                        try:
+                            self.data[region_short]["노령화지수"] = float(row[col])
+                        except (ValueError, TypeError):
+                            self.data[region_short]["노령화지수"] = 400.0
+
+            # 데이터 확인
+            print("로드된 데이터:")
+            for region, values in self.data.items():
+                print(f"{region}: {values}")
+
+            # 누락된 지역이 있는지 확인하고 기본값으로 채우기
+            all_regions = ["강원", "경기", "경남", "경북", "광주", "대구", "대전", "부산",
+                           "서울", "세종", "울산", "인천", "전남", "전북", "제주", "충남", "충북"]
+
+            for region in all_regions:
+                if region not in self.data:
+                    self.data[region] = {
+                        "자살률(10만명당)": 50.0,
+                        "기초연금 수급률": 65.0,
+                        "독거노인가구비율": 10.0,
+                        "복지시설률": 5.0,
+                        "노령화지수": 400.0
+                    }
+                else:
+                    # 누락된 지표가 있는지 확인
+                    if "자살률(10만명당)" not in self.data[region]:
+                        self.data[region]["자살률(10만명당)"] = 50.0
+                    if "기초연금 수급률" not in self.data[region]:
+                        self.data[region]["기초연금 수급률"] = 65.0
+                    if "독거노인가구비율" not in self.data[region]:
+                        self.data[region]["독거노인가구비율"] = 10.0
+                    if "복지시설률" not in self.data[region]:
+                        self.data[region]["복지시설률"] = 5.0
+                    if "노령화지수" not in self.data[region]:
+                        self.data[region]["노령화지수"] = 400.0
+
+        except Exception as e:
+            print(f"데이터 로드 중 오류 발생: {e}")
+            print(f"오류 상세: {traceback.format_exc()}")
+
+            # 오류 발생 시 더미 데이터 사용
+            print("더미 데이터로 대체합니다.")
+
+            # 더미 데이터 - 실제 값으로 수정
+            self.data = {
+                "서울": {
+                    "자살률(10만명당)": 45.3,
+                    "기초연금 수급률": 53.94,
+                    "독거노인가구비율": 8.1,
+                    "복지시설률": 2.75,
+                    "노령화지수": 253.2
+                },
+                "부산": {
+                    "자살률(10만명당)": 48.0,
+                    "기초연금 수급률": 70.74,
+                    "독거노인가구비율": 11.9,
+                    "복지시설률": 1.58,
+                    "노령화지수": 404.1
+                },
+                "대구": {
+                    "자살률(10만명당)": 39.9,
+                    "기초연금 수급률": 69.59,
+                    "독거노인가구비율": 10.6,
+                    "복지시설률": 5.38,
+                    "노령화지수": 402.9
+                },
+                "인천": {
+                    "자살률(10만명당)": 46.5,
+                    "기초연금 수급률": 70.54,
+                    "독거노인가구비율": 9.3,
+                    "복지시설률": 9.19,
+                    "노령화지수": 326.9
+                },
+                "광주": {
+                    "자살률(10만명당)": 53.6,
+                    "기초연금 수급률": 65.33,
+                    "독거노인가구비율": 8.9,
+                    "복지시설률": 4.2,
+                    "노령화지수": 295.5
+                },
+                "대전": {
+                    "자살률(10만명당)": 56.6,
+                    "기초연금 수급률": 63.87,
+                    "독거노인가구비율": 8.3,
+                    "복지시설률": 5.76,
+                    "노령화지수": 259.2
+                },
+                "울산": {
+                    "자살률(10만명당)": 43.4,
+                    "기초연금 수급률": 63.96,
+                    "독거노인가구비율": 8.1,
+                    "복지시설률": 2.96,
+                    "노령화지수": 259.6
+                },
+                "세종": {
+                    "자살률(10만명당)": 48.8,
+                    "기초연금 수급률": 53.15,
+                    "독거노인가구비율": 4.9,
+                    "복지시설률": 4.56,
+                    "노령화지수": 288.1
+                },
+                "경기": {
+                    "자살률(10만명당)": 49.0,
+                    "기초연금 수급률": 61.08,
+                    "독거노인가구비율": 7.4,
+                    "복지시설률": 9.48,
+                    "노령화지수": 256.3
+                },
+                "강원": {
+                    "자살률(10만명당)": 67.2,
+                    "기초연금 수급률": 67.5,
+                    "독거노인가구비율": 13.1,
+                    "복지시설률": 8.71,
+                    "노령화지수": 641.6
+                },
+                "충북": {
+                    "자살률(10만명당)": 56.4,
+                    "기초연금 수급률": 60.24,
+                    "독거노인가구비율": 11.0,
+                    "복지시설률": 8.5,
+                    "노령화지수": 214.3
+                },
+                "충남": {
+                    "자살률(10만명당)": 72.2,
+                    "기초연금 수급률": 77.48,
+                    "독거노인가구비율": 15.5,
+                    "복지시설률": 6.74,
+                    "노령화지수": 829.6
+                },
+                "전북": {
+                    "자살률(10만명당)": 42.7,
+                    "기초연금 수급률": 73.15,
+                    "독거노인가구비율": 13.5,
+                    "복지시설률": 5.79,
+                    "노령화지수": 751.4
+                },
+                "전남": {
+                    "자살률(10만명당)": 42.9,
+                    "기초연금 수급률": 71.05,
+                    "독거노인가구비율": 11.1,
+                    "복지시설률": 7.54,
+                    "노령화지수": 795.8
+                },
+                "경북": {
+                    "자살률(10만명당)": 43.6,
+                    "기초연금 수급률": 73.68,
+                    "독거노인가구비율": 13.6,
+                    "복지시설률": 6.74,
+                    "노령화지수": 949.1
+                },
+                "경남": {
+                    "자살률(10만명당)": 46.0,
+                    "기초연금 수급률": 71.66,
+                    "독거노인가구비율": 12.0,
+                    "복지시설률": 3.75,
+                    "노령화지수": 852.5
+                },
+                "제주": {
+                    "자살률(10만명당)": 41.9,
+                    "기초연금 수급률": 69.5,
+                    "독거노인가구비율": 8.5,
+                    "복지시설률": 5.63,
+                    "노령화지수": 778.4
+                }
+            }
 
         self.regions = list(self.data.keys())
         self.current_region = "서울"
 
         # 지표 이름과 단위
         self.indicators = {
-            "자살률": "명",
+            "자살률(10만명당)": "명",
             "기초연금 수급률": "%",
-            "1인 가구 수": "가구",
-            "복지시설 수": "개",
-            "노령화 지수": "???"
+            "독거노인가구비율": "%",
+            "복지시설률": "%",
+            "노령화지수": ""
         }
 
     def create_interface(self):
@@ -319,7 +427,7 @@ class RegionalAnalysisPage:
         # 왼쪽 패널 구성
         self.create_left_panel(left_panel)
 
-        # 오른쪽 패널 구성
+        # ���른쪽 패널 구성
         self.create_right_panel(right_panel)
 
     def create_left_panel(self, parent):
@@ -409,116 +517,94 @@ class RegionalAnalysisPage:
         map_container = tk.Frame(parent, bg='white')
         map_container.pack(expand=True, fill='both', padx=10, pady=10)
 
-        # 로딩 라벨
-        self.loading_label = tk.Label(
-            map_container,
-            text="지도 로딩 중...",
-            font=self.label_font,
-            bg='white',
-            fg='#666666'
-        )
-        self.loading_label.pack(expand=True)
+        # matplotlib 지도 생성 (즉시 생성)
+        self.map_fig, self.map_ax = plt.subplots(figsize=(4, 5))
+        self.map_fig.patch.set_facecolor('white')
 
-        # 지도 이미지 라벨 (초기에는 숨김)
-        self.map_label = tk.Label(map_container, bg='white')
+        # tkinter에 지도 임베드
+        self.map_canvas = FigureCanvasTkAgg(self.map_fig, map_container)
+        self.map_canvas.get_tk_widget().pack(fill='both', expand=True)
 
         # 초기 지도 생성
         self.update_map()
 
     def update_map(self):
-        """지도 업데이트 (백그라운드에서 실행)"""
-        if self.gdf is None or self.지역컬럼 is None:
-            self.loading_label.config(text="지도 데이터를 찾을 수 없습니다")
-            return
-
-        self.loading_label.config(text="지도 생성 중...")
+        """지도 업데이트 - 무조건 지도 표시"""
         print(f"지도 업데이트 시작 - 현재 지역: {self.current_region}")
 
-        def generate_map():
-            try:
-                print("지도 생성 함수 시작")
+        self.map_ax.clear()
 
+        if hasattr(self, 'use_dummy_map') and self.use_dummy_map:
+            # 더미 지도 생성
+            print("더미 지도 생성")
+
+            # 배경 설정
+            self.map_ax.set_xlim(0, 1)
+            self.map_ax.set_ylim(0, 1)
+            self.map_ax.set_aspect('equal')
+
+            # 각 지역을 원으로 표시
+            for region, coords in self.dummy_regions.items():
+                if region == self.current_region:
+                    color = 'red'
+                    alpha = 0.8
+                else:
+                    color = 'lightblue'
+                    alpha = 0.6
+
+                # 원 그리기
+                circle = patches.Circle((coords["x"], coords["y"]), coords["size"],
+                                        color=color, alpha=alpha, edgecolor='black', linewidth=1)
+                self.map_ax.add_patch(circle)
+
+                # 지역명 표시
+                self.map_ax.text(coords["x"], coords["y"], region,
+                                 ha='center', va='center', fontsize=8, fontweight='bold')
+
+            self.map_ax.set_title(f"선택 지역: {self.current_region}", fontsize=12, pad=10)
+
+        elif self.gdf is not None and self.지역컬럼 is not None:
+            # 실제 지도 데이터 사용
+            print("실제 지도 데이터 사용")
+
+            try:
                 # 지도 데이터 복사
                 gdf_copy = self.gdf.copy()
-                print(f"GeoDataFrame 복사 완료, 행 수: {len(gdf_copy)}")
 
-                # 선택된 지역에 해당하는 키 찾기
-                selected_key = self.reverse_mapping.get(self.current_region, self.current_region)
-                print(f"선택된 지역 키: {selected_key}")
+                # 색상 설정
+                gdf_copy["color"] = "lightblue"  # 기본 색상
+                for idx, row in gdf_copy.iterrows():
+                    region_name = str(row[self.지역컬럼])
+                    for full_name, short_name in self.region_mapping.items():
+                        if full_name in region_name or short_name in region_name:
+                            if short_name == self.current_region:
+                                gdf_copy.at[idx, "color"] = "red"
+                                break
 
-                # 색상 컬럼 생성
-                if self.use_code_mapping:
-                    print("코드 기반 매핑 사용")
-                    # 코드 기반 매핑
-                    gdf_copy["color"] = gdf_copy[self.지역컬럼].apply(
-                        lambda x: "red" if str(x) == str(selected_key) else "lightblue"
-                    )
-                else:
-                    print("지역명 기반 매핑 사용")
-                    # 지역명 기반 매핑
-                    gdf_copy["color"] = "lightblue"  # 기본 색상
-                    for idx, row in gdf_copy.iterrows():
-                        region_name = str(row[self.지역컬럼])
-                        for full_name, short_name in self.region_mapping.items():
-                            if full_name in region_name or short_name in region_name:
-                                if short_name == self.current_region:
-                                    gdf_copy.at[idx, "color"] = "red"
-                                    print(f"지역 {region_name}을 빨간색으로 설정")
-                                    break
-
-                print("색상 설정 완료")
-
-                # 지도 생성
-                print("matplotlib 지도 생성 시작")
-                fig, ax = plt.subplots(figsize=(4, 5))
-                gdf_copy.plot(ax=ax, color=gdf_copy["color"], edgecolor="black", linewidth=0.5)
-                ax.set_title(f"선택 지역: {self.current_region}", fontsize=12, pad=10)
-                ax.axis('off')
-                print("matplotlib 지도 생성 완료")
-
-                # 임시 파일로 저장
-                map_filename = f"temp_map_{self.current_region}.png"
-                print(f"지도를 {map_filename}에 저장 중...")
-                plt.savefig(map_filename, bbox_inches="tight", dpi=100, facecolor='white')
-                plt.close()
-                print("지도 파일 저장 완료")
-
-                # 이미지 로드 및 UI 업데이트
-                print("이미지 로드 시작")
-                img = Image.open(map_filename)
-                img = img.resize((300, 280), Image.Resampling.LANCZOS)
-                tk_img = ImageTk.PhotoImage(img)
-                print("이미지 로드 완료")
-
-                def update_ui():
-                    print("UI 업데이트 시작")
-                    self.loading_label.pack_forget()
-                    self.map_label.config(image=tk_img)
-                    self.map_label.image = tk_img  # 참조 유지
-                    self.map_label.pack(expand=True)
-                    print("UI 업데이트 완료")
-
-                self.parent.after(0, update_ui)
-
-                # 임시 파일 삭제
-                try:
-                    os.remove(map_filename)
-                    print("임시 파일 삭제 완료")
-                except:
-                    print("임시 파일 삭제 실패")
-                    pass
+                # 지도 그리기
+                gdf_copy.plot(ax=self.map_ax, color=gdf_copy["color"], edgecolor="black", linewidth=0.5)
+                self.map_ax.set_title(f"선택 지역: {self.current_region}", fontsize=12, pad=10)
 
             except Exception as e:
-                print(f"지도 생성 오류: {e}")
-                print(f"오류 상세: {traceback.format_exc()}")
+                print(f"실제 지도 그리기 실패: {e}")
+                # 실패 시 더미 지도로 대체
+                self.use_dummy_map = True
+                self.update_map()
+                return
+        else:
+            # 최후의 수단: 텍스트 지도
+            print("텍스트 지도 생성")
+            self.map_ax.text(0.5, 0.5, f"선택된 지역:\n{self.current_region}",
+                             ha='center', va='center', fontsize=16, fontweight='bold',
+                             bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.7))
+            self.map_ax.set_xlim(0, 1)
+            self.map_ax.set_ylim(0, 1)
 
-                def show_error():
-                    self.loading_label.config(text=f"지도 생성 실패: {str(e)}")
+        self.map_ax.axis('off')
 
-                self.parent.after(0, show_error)
-
-        # 백그라운드 스레드에서 지도 생성
-        threading.Thread(target=generate_map, daemon=True).start()
+        # 지도 업데이트
+        self.map_canvas.draw()
+        print("지도 업데이트 완료")
 
     def create_radar_chart(self, parent):
         # matplotlib 레이더 차트
@@ -545,16 +631,16 @@ class RegionalAnalysisPage:
         # 값들을 0-1 범위로 정규화
         for indicator in indicators:
             value = region_data[indicator]
-            if indicator == "자살률":
-                normalized = value / 35.0  # 최대 35로 가정
+            if indicator == "자살률(10만명당)":
+                normalized = value / 80.0  # 최대 80으로 가정
             elif indicator == "기초연금 수급률":
-                normalized = value / 30.0  # 최대 30%로 가정
-            elif indicator == "1인 가구 수":
-                normalized = value / 2500000  # 최대 250만으로 가정
-            elif indicator == "복지시설 수":
-                normalized = value / 1500  # 최대 1500개로 가정
-            elif indicator == "노령화 지수":
-                normalized = value / 30.0  # 최대 30으로 가정
+                normalized = value / 100.0  # 최대 100%
+            elif indicator == "독거노인가구비율":
+                normalized = value / 20.0  # 최대 20%로 가정
+            elif indicator == "복지시설률":
+                normalized = value / 15.0  # 최대 15%로 가정
+            elif indicator == "노령화지수":
+                normalized = value / 1000.0  # 최대 1000으로 가정
 
             values.append(min(normalized, 1.0))  # 1.0을 넘지 않도록
 
@@ -597,12 +683,18 @@ class RegionalAnalysisPage:
         # 데이터 표시
         indicators = list(self.indicators.keys())
 
-        # 5개 지표를 한 줄에 표시
-        row_frame = tk.Frame(self.data_container, bg='white')
-        row_frame.pack(expand=True, fill='x')
+        # 첫 번째 줄 (3개 지표)
+        row1_frame = tk.Frame(self.data_container, bg='white')
+        row1_frame.pack(expand=True, fill='x', pady=(0, 10))
 
-        for i, indicator in enumerate(indicators):
-            col_frame = tk.Frame(row_frame, bg='white')
+        # 두 번째 줄 (2개 지표)
+        row2_frame = tk.Frame(self.data_container, bg='white')
+        row2_frame.pack(expand=True, fill='x')
+
+        # 첫 번째 줄에 3개 지표 표시
+        for i in range(min(3, len(indicators))):
+            indicator = indicators[i]
+            col_frame = tk.Frame(row1_frame, bg='white')
             col_frame.pack(side='left', expand=True, fill='both', padx=10)
 
             # 지표명
@@ -619,17 +711,48 @@ class RegionalAnalysisPage:
             value = region_data[indicator]
             unit = self.indicators[indicator]
 
-            if indicator == "1인 가구 수":
-                if value >= 1000000:
-                    value_text = f"{value // 10000}만{unit}"
-                else:
-                    value_text = f"{value // 1000}천{unit}"
-            elif indicator == "복지시설 수":
-                value_text = f"{int(value)}{unit}"
-            elif unit == "%":
+            if unit == "%":
+                value_text = f"{value:.1f}{unit}"
+            elif unit == "명":
                 value_text = f"{value:.1f}{unit}"
             else:
+                value_text = f"{value:.1f}"
+
+            value_label = tk.Label(
+                col_frame,
+                text=value_text,
+                font=self.data_font,
+                bg='white',
+                fg='#333333'
+            )
+            value_label.pack()
+
+        # 두 번째 줄에 나머지 지표 표시
+        for i in range(3, len(indicators)):
+            indicator = indicators[i]
+            col_frame = tk.Frame(row2_frame, bg='white')
+            col_frame.pack(side='left', expand=True, fill='both', padx=10)
+
+            # 지표명
+            indicator_label = tk.Label(
+                col_frame,
+                text=indicator,
+                font=self.label_font,
+                bg='white',
+                fg='#666666'
+            )
+            indicator_label.pack(pady=(0, 5))
+
+            # 값
+            value = region_data[indicator]
+            unit = self.indicators[indicator]
+
+            if unit == "%":
                 value_text = f"{value:.1f}{unit}"
+            elif unit == "명":
+                value_text = f"{value:.1f}{unit}"
+            else:
+                value_text = f"{value:.1f}"
 
             value_label = tk.Label(
                 col_frame,
