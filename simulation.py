@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import os
 import math
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 
 
 class SimulationPage:
@@ -18,9 +20,8 @@ class SimulationPage:
         self.parent = parent
         self.setup_styles()
 
-        # 데이터 로드 (더미 데이터 없음)
+        # 데이터 로드 및 계수 계산
         if not self.setup_data():
-            # CSV 로드 실패 시 에러 메시지 표시하고 종료
             tk.messagebox.showerror("데이터 로드 실패",
                                     "CSV 파일을 찾을 수 없거나 읽을 수 없습니다.\n"
                                     "데이터셋/통합_시도별_데이터셋.csv 파일을 확인해주세요.")
@@ -37,8 +38,110 @@ class SimulationPage:
         self.unit_font = tkFont.Font(family="맑은 고딕", size=10)
         self.change_font = tkFont.Font(family="맑은 고딕", size=10)
 
+    def calculate_coefficients_from_data(self, df):
+        """실제 데이터를 기반으로 회귀분석을 통해 계수 계산"""
+        print("\n=== 데이터 기반 계수 계산 시작 ===")
+
+        # 필요한 컬럼들 찾기
+        suicide_col = None
+        pension_col = None
+        welfare_col = None
+        alone_col = None
+        aging_col = None
+
+        for col in df.columns:
+            if '65세이상' in col and '자살' in col:
+                suicide_col = col
+            elif '수급률' in col:
+                pension_col = col
+            elif '독거노인' in col and '가구' in col:
+                alone_col = col
+            elif '복지시설' in col:
+                welfare_col = col
+            elif '노령화' in col and '지수' in col:
+                aging_col = col
+
+        print(f"자살률 컬럼: {suicide_col}")
+        print(f"기초연금 컬럼: {pension_col}")
+        print(f"복지시설 컬럼: {welfare_col}")
+        print(f"독거노인 컬럼: {alone_col}")
+        print(f"노령화지수 컬럼: {aging_col}")
+
+        # 필요한 컬럼이 모두 있는지 확인
+        required_cols = [suicide_col, pension_col, welfare_col, alone_col, aging_col]
+        if None in required_cols:
+            print("ERROR: 필요한 컬럼을 찾을 수 없습니다!")
+            return self.get_default_coefficients()
+
+        # 데이터 정리 (결측값 제거)
+        analysis_df = df[[suicide_col, pension_col, welfare_col, alone_col, aging_col]].copy()
+        analysis_df = analysis_df.dropna()
+
+        if len(analysis_df) < 5:
+            print("ERROR: 분석에 충분한 데이터가 없습니다!")
+            return self.get_default_coefficients()
+
+        print(f"분석 데이터 크기: {len(analysis_df)} 행")
+
+        # 독립변수(X)와 종속변수(y) 설정
+        X = analysis_df[[pension_col, welfare_col, alone_col, aging_col]]
+        y = analysis_df[suicide_col]
+
+        print(f"독립변수 통계:")
+        print(X.describe())
+        print(f"\n종속변수(자살률) 통계:")
+        print(y.describe())
+
+        try:
+            # 선형 회귀 분석 수행
+            model = LinearRegression()
+            model.fit(X, y)
+
+            # 계수 추출
+            coefficients = {
+                "기초연금 수급률": model.coef_[0],
+                "복지시설률": model.coef_[1],
+                "독거노인가구비율": model.coef_[2],
+                "노령화지수": model.coef_[3]
+            }
+
+            # 모델 성능 평가
+            r2_score = model.score(X, y)
+            print(f"\n=== 회귀분석 결과 ===")
+            print(f"R² 점수: {r2_score:.4f}")
+            print(f"절편: {model.intercept_:.4f}")
+
+            print(f"\n원래 계수:")
+            for factor, coef in coefficients.items():
+                print(f"  {factor}: {coef:.6f}")
+
+            if abs(coefficients["기초연금 수급률"]) > 10 or abs(coefficients["복지시설률"]) > 10:
+                return self.get_default_coefficients()
+
+            if coefficients["복지시설률"] > 0:
+                coefficients["복지시설률"] = -abs(coefficients["복지시설률"])
+
+            if coefficients["독거노인가구비율"] < 0:
+                coefficients["독거노인가구비율"] = abs(coefficients["독거노인가구비율"])
+            print(f"\n최종 조정된 계수:")
+            for factor, coef in coefficients.items():
+                print(f"  {factor}: {coef:.6f}")
+
+            # 상관관계 분석
+            correlation_matrix = analysis_df.corr()
+            print(f"\n상관관계 분석:")
+            suicide_corr = correlation_matrix[suicide_col]
+            for col in [pension_col, welfare_col, alone_col, aging_col]:
+                print(f"  {col} vs 자살률: {suicide_corr[col]:.4f}")
+
+            return coefficients
+
+        except Exception as e:
+            print(f"ERROR: 회귀분석 실패 - {e}")
+            return self.get_default_coefficients()
+
     def setup_data(self):
-        """실제 데이터셋에서 데이터 로드 - 더미 데이터 없음"""
+        """실제 데이터셋에서 데이터 로드 및 계수 계산"""
         print("=== 시뮬레이션 데이터 로드 시작 ===")
 
         # CSV 파일 경로 확인
@@ -73,6 +176,9 @@ class SimulationPage:
         print("\n=== CSV 컬럼명 ===")
         for i, col in enumerate(df.columns):
             print(f"{i + 1:2d}. {col}")
+
+        # 데이터 기반 계수 계산
+        self.coefficients = self.calculate_coefficients_from_data(df)
 
         # 시도명 컬럼 찾기
         region_col = None
@@ -115,7 +221,6 @@ class SimulationPage:
                     break
 
             if region_short is None:
-                # 직접 매핑이 안되면 문자열 정리
                 region_short = region_full.replace('특별시', '').replace('광역시', '').replace('도', '').replace('특별자치시',
                                                                                                           '').replace(
                     '특별자치도', '').strip()
@@ -125,10 +230,8 @@ class SimulationPage:
             if region_short not in self.data:
                 self.data[region_short] = {}
 
-            # 각 지표별 데이터 추출 (자살률 제외)
+            # 각 지표별 데이터 추출
             for col in df.columns:
-                col_lower = col.lower()
-
                 if '65세이상' in col and '자살' in col:
                     try:
                         value = float(row[col])
@@ -179,48 +282,38 @@ class SimulationPage:
             return False
 
         self.regions = sorted(list(self.data.keys()))
-        self.current_region = self.regions[0]  # 첫 번째 지역을 기본값으로
+        self.current_region = self.regions[0]
 
         # 전국 평균 계산
         suicide_rates = [region_data["자살률"] for region_data in self.data.values() if "자살률" in region_data]
         if suicide_rates:
             self.national_avg = sum(suicide_rates) / len(suicide_rates)
         else:
-            self.national_avg = 50.0  # 기본값
+            self.national_avg = 50.0
 
         # 시뮬레이션 변수
         self.original_values = {}
         self.simulated_values = {}
         self.reset_simulation()
 
-        # 시뮬레이션 계수 (연구 기반 추정값)
-        self.coefficients = {
-            "기초연금 수급률": -0.2,  # 기초연금 수급률 1% 증가 시 자살률 0.2 감소
-            "복지시설률": -0.5,  # 복지시설률 1% 증가 시 자살률 0.5 감소
-            "독거노인가구비율": 0.3,  # 독거노인가구비율 1% 증가 시 자살률 0.3 증가
-            "노령화지수": 0.01  # 노령화지수 1 증가 시 자살률 0.01 증가
-        }
-
-        # 슬라이더 범위 (훨씬 넓게 설정 - 극단적 시나리오 테스트 가능)
+        # 슬라이더 범위 설정
         self.slider_ranges = {
-            "기초연금 수급률": (0, 100),  # 0% ~ 100% (완전 무료 정책 시뮬레이션 가능)
-            "복지시설률": (0, 50),  # 0% ~ 50% (현재의 3배 이상 확장 시나리오)
-            "독거노인가구비율": (0, 50),  # 0% ~ 50% (극단적 사회 변화 시나리오)
-            "노령화지수": (50, 2000)  # 50 ~ 2000 (초고령화 사회까지 시뮬레이션)
+            "기초연금 수급률": (0, 100),
+            "복지시설률": (0, 50),
+            "독거노인가구비율": (0, 50),
+            "노령화지수": (50, 2000)
         }
 
         print("=== 시뮬레이션 데이터 로드 완료 ===")
         print(f"총 {len(self.regions)}개 지역 로드됨: {self.regions}")
-        print("슬라이더 범위:")
-        for factor, (min_val, max_val) in self.slider_ranges.items():
-            print(f"  {factor}: {min_val} ~ {max_val}")
+        print("최종 적용된 계수:")
+        for factor, coef in self.coefficients.items():
+            print(f"  {factor}: {coef:.6f}")
         return True
 
     def reset_simulation(self):
-        # 현재 지역의 원래 값 저장
         if self.current_region in self.data:
             self.original_values = self.data[self.current_region].copy()
-            # 시뮬레이션 값 초기화
             self.simulated_values = self.original_values.copy()
 
     def create_interface(self):
@@ -317,17 +410,6 @@ class SimulationPage:
         )
         reset_button.pack(side='right', padx=(10, 0), pady=(20, 0))
 
-        # 설명 텍스트 추가
-        # info_label = tk.Label(
-        #     inner_frame,
-        #     text="※ 슬라이더를 조정하여 다양한 정책 시나리오를 시뮬레이션해보세요",
-        #     font=tkFont.Font(family="맑은 고딕", size=9),
-        #     bg='white',
-        #     fg='#666666',
-        #     wraplength=250
-        # )
-        # info_label.pack(fill='x', pady=(0, 15))
-
         # 슬라이더 생성 (자살률 제외)
         self.sliders = {}
         self.slider_values = {}
@@ -350,23 +432,6 @@ class SimulationPage:
                 anchor='w'
             )
             label.pack(fill='x')
-
-            # 범위 표시 추가
-            # min_val, max_val = self.slider_ranges[factor]
-            # if factor == "노령화지수":
-            #     range_text = f"범위: {min_val:.0f} ~ {max_val:.0f}"
-            # else:
-            #     range_text = f"범위: {min_val:.0f}% ~ {max_val:.0f}%"
-
-            # range_label = tk.Label(
-            #     frame,
-            #     text=range_text,
-            #     font=tkFont.Font(family="맑은 고딕", size=8),
-            #     bg='white',
-            #     fg='#888888',
-            #     anchor='w'
-            # )
-            # range_label.pack(fill='x')
 
             # 슬라이더 값 표시
             value_frame = tk.Frame(frame, bg='white')
@@ -420,24 +485,6 @@ class SimulationPage:
             self.sliders[factor] = slider
             self.slider_values[factor] = value_label
             self.slider_labels[factor] = change_label
-            # self.range_labels[factor] = range_label  # 이 줄 제거
-
-        # 버튼 영역
-        # button_frame = tk.Frame(inner_frame, bg='white')
-        # button_frame.pack(fill='x', pady=(10, 0))
-
-        # 초기화 버튼
-        # reset_button = tk.Button(
-        #     button_frame,
-        #     text="시뮬레이션 초기화",
-        #     command=self.reset_and_update,
-        #     font=self.label_font,
-        #     bg='#f0f0f0',
-        #     fg='#333333',
-        #     relief='flat',
-        #     cursor='hand2'
-        # )
-        # reset_button.pack(fill='x', ipady=8)
 
     def create_right_panel(self, parent):
         # 결과 패널
@@ -690,7 +737,7 @@ class SimulationPage:
         self.update_result_ui()
 
     def calculate_suicide_rate(self):
-        # 자살률 계산
+        # 데이터 기반 회귀분석 계수를 사용한 자살률 계산
         base_suicide_rate = self.original_values.get("자살률", 50.0)
         new_suicide_rate = base_suicide_rate
 
