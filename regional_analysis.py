@@ -40,6 +40,8 @@ class RegionalAnalysisPage:
             return
 
         self.load_geodata()
+        # 평균 데이터 계산
+        self.calculate_averages()
         self.create_interface()
 
     def setup_styles(self):
@@ -48,6 +50,24 @@ class RegionalAnalysisPage:
         self.label_font = tkFont.Font(family="맑은 고딕", size=11)
         self.data_font = tkFont.Font(family="맑은 고딕", size=24, weight="bold")
         self.unit_font = tkFont.Font(family="맑은 고딕", size=10)
+
+    def calculate_averages(self):
+        """모든 지역의 평균값 계산"""
+        self.averages = {}
+
+        # 각 지표별로 평균 계산
+        for indicator in self.indicators.keys():
+            values = []
+            for region_data in self.data.values():
+                if indicator in region_data:
+                    values.append(region_data[indicator])
+
+            if values:
+                self.averages[indicator] = sum(values) / len(values)
+            else:
+                self.averages[indicator] = 0
+
+        print("평균값 계산 완료:", self.averages)
 
     def load_geodata(self):
         """지도 데이터 로드 - 실패 시 더미 지도 생성"""
@@ -548,32 +568,51 @@ class RegionalAnalysisPage:
 
         # 지표들과 값들
         indicators = list(self.indicators.keys())
-        values = []
+        region_values = []
+        average_values = []
 
         # 값들을 0-1 범위로 정규화
         for indicator in indicators:
-            value = region_data[indicator]
-            if indicator == "자살률(10만명당)":
-                normalized = value / 80.0  # 최대 80으로 가정
-            elif indicator == "기초연금 수급률":
-                normalized = value / 100.0  # 최대 100%
-            elif indicator == "독거노인가구비율":
-                normalized = value / 20.0  # 최대 20%로 가정
-            elif indicator == "복지시설률":
-                normalized = value / 15.0  # 최대 15%로 가정
-            elif indicator == "노령화지수":
-                normalized = value / 1000.0  # 최대 1000으로 가정
+            # 현재 지역 값
+            region_value = region_data[indicator]
+            # 평균 값
+            average_value = self.averages[indicator]
 
-            values.append(min(normalized, 1.0))  # 1.0을 넘지 않도록
+            if indicator == "자살률(10만명당)":
+                region_normalized = region_value / 80.0  # 최대 80으로 가정
+                average_normalized = average_value / 80.0
+            elif indicator == "기초연금 수급률":
+                region_normalized = region_value / 100.0  # 최대 100%
+                average_normalized = average_value / 100.0
+            elif indicator == "독거노인가구비율":
+                region_normalized = region_value / 20.0  # 최대 20%로 가정
+                average_normalized = average_value / 20.0
+            elif indicator == "복지시설률":
+                region_normalized = region_value / 15.0  # 최대 15%로 가정
+                average_normalized = average_value / 15.0
+            elif indicator == "노령화지수":
+                region_normalized = region_value / 1000.0  # 최대 1000으로 가정
+                average_normalized = average_value / 1000.0
+
+            region_values.append(min(region_normalized, 1.0))  # 1.0을 넘지 않도록
+            average_values.append(min(average_normalized, 1.0))
 
         # 각도 계산
         angles = np.linspace(0, 2 * np.pi, len(indicators), endpoint=False).tolist()
-        values += values[:1]  # 닫힌 도형을 만들기 위해
+
+        # 닫힌 도형을 만들기 위해 첫 번째 값을 마지막에 추가
+        region_values += region_values[:1]
+        average_values += average_values[:1]
         angles += angles[:1]
 
-        # 레이더 차트 그리기
-        self.radar_ax.plot(angles, values, 'o-', linewidth=2, color='purple', alpha=0.8)
-        self.radar_ax.fill(angles, values, alpha=0.3, color='purple')
+        # 현재 지역 레이더 차트 그리기 (보라색)
+        self.radar_ax.plot(angles, region_values, 'o-', linewidth=2, color='purple', alpha=0.8,
+                           label=self.current_region)
+        self.radar_ax.fill(angles, region_values, alpha=0.3, color='purple')
+
+        # 평균 레이더 차트 그리기 (주황색)
+        self.radar_ax.plot(angles, average_values, 's-', linewidth=2, color='orange', alpha=0.8, label='전국 평균')
+        self.radar_ax.fill(angles, average_values, alpha=0.2, color='orange')
 
         # 축 레이블 설정
         self.radar_ax.set_xticks(angles[:-1])
@@ -582,6 +621,9 @@ class RegionalAnalysisPage:
         self.radar_ax.set_yticks([0.2, 0.4, 0.6, 0.8, 1.0])
         self.radar_ax.set_yticklabels([])
         self.radar_ax.grid(True)
+
+        # 범례 추가
+        self.radar_ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.0), fontsize=8)
 
         # 차트 업데이트
         self.radar_canvas.draw()
